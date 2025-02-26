@@ -1,31 +1,31 @@
-name: Build React Native Android APK
+name: Build React Native Android APK (with AI Debugging)
 
 on:
   push:
     branches:
-      - main  # Runs when you push to the 'main' branch
+      - main
   pull_request:
     branches:
-      - main  # Runs on pull requests to 'main'
-  workflow_dispatch:  # Allows manual triggering from GitHub Actions
+      - main
+  workflow_dispatch:
 
 jobs:
   build:
-    name: Build Android APK
-    runs-on: ubuntu-latest  # Runs on Ubuntu
+    name: Build Android APK with AI Debugging
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4  # Pulls your project from GitHub
+        uses: actions/checkout@v4
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 18  # Adjust based on your project's requirements
+          node-version: 18
           cache: 'npm'
 
       - name: Install dependencies
-        run: npm install  # Installs React Native dependencies
+        run: npm install || echo "⚠️ Dependency installation failed!" >> build-errors.log
 
       - name: Setup Java for Android
         uses: actions/setup-java@v4
@@ -34,16 +34,47 @@ jobs:
           java-version: '17'
 
       - name: Install Android SDK
-        uses: android-actions/setup-android@v3  # Sets up Android SDK
+        uses: android-actions/setup-android@v3
 
       - name: Grant execution permission to Gradle
-        run: chmod +x android/gradlew  # Ensures Gradle is executable
+        run: chmod +x android/gradlew
+
+      - name: Run AI Code Analysis (CodiumAI)
+        run: npx codium analyze . || echo "⚠️ CodiumAI found issues!" >> build-errors.log
+
+      - name: Run Static Code Analysis (SonarCloud)
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: |
+          npx sonar-scanner \
+            -Dsonar.organization=your-org \
+            -Dsonar.projectKey=your-project \
+            -Dsonar.sources=. \
+            -Dsonar.host.url=https://sonarcloud.io || echo "⚠️ SonarCloud found issues!" >> build-errors.log
 
       - name: Build APK
-        run: cd android && ./gradlew assembleRelease  # Builds APK
+        run: |
+          cd android
+          ./gradlew assembleRelease || echo "⚠️ APK Build failed!" >> ../build-errors.log
 
-      - name: Upload APK Artifact
+      - name: Check for errors
+        run: |
+          if [ -f build-errors.log ]; then
+            echo "❌ Build failed! Check the error log below:"
+            cat build-errors.log
+            exit 1
+          fi
+
+      - name: Upload APK Artifact (if successful)
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: android-apk
           path: android/app/build/outputs/apk/release/app-release.apk
+
+      - name: Upload Build Logs (if errors occur)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-error-logs
+          path: build-errors.log
